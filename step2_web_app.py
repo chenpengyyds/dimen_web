@@ -14,8 +14,8 @@ import sqlite3
 st.set_page_config(page_title="材料属性检索中心", page_icon="🏭", layout="wide")
 
 # 2. 网页大标题
-st.title("🏭 厂长专属：一维/二维王牌材料检索大本营")
-st.markdown("欢迎来到数字孪生材料工厂！在这里，您可以毫秒级查询 SQLite 数据库中的极品材料。")
+st.title("🏭 cp专属：一维/二维材料检索大本营")
+st.markdown("欢迎来到数字孪生材料工厂！在这里，您可以毫秒级查询 SQLite 数据库中的材料。")
 
 # 3. 左侧边栏：检索控制台
 st.sidebar.header("🔍 精准筛选引擎")
