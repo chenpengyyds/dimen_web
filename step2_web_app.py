@@ -10,69 +10,68 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 
-# 【必须放在第一行】开启宽屏模式
-st.set_page_config(page_title="低维材料数据库", layout="wide")
+# 1. 宽屏模式
+st.set_page_config(page_title="材料极速检索", layout="wide")
 
+# 2. 数据库超频连接（保持不变）
 @st.cache_resource
-def init_conn():
-    return sqlite3.connect("materials_web.db", check_same_thread=False)
+def get_connection():
+    conn = sqlite3.connect("materials_web.db", check_same_thread=False)
+    conn.execute("PRAGMA cache_size = 10000")
+    conn.execute("PRAGMA temp_store = MEMORY") # 💡 临时数据存在内存，极速
+    return conn
 
-conn = init_conn()
+# 3. 带缓存的查询（保持不变）
+@st.cache_data(show_spinner=False)
+def fetch_data(query_sql, params):
+    conn = get_connection()
+    return pd.read_sql_query(query_sql, conn, params=params)
 
-# --- 侧边栏：筛选控制 ---
-with st.sidebar:
-    st.title("🔍 筛选中心")
-    formula = st.text_input("元素/化学式 (如 MgO):", "")
-    energy_cutoff = st.slider("最高形成能 (eV/atom):", -5.0, 0.5, 0.0)
-    st.divider()
-    st.info("提示：点击表格标题可排序")
+# --- 主界面 ---
+st.markdown("# 🔬 低维材料属性检索系统")
 
-# --- 主界面：头部 ---
-st.markdown("# 🔬 第一性原理低维材料属性平台")
-st.caption("基于 Materials Project 高通量计算数据")
+# 4. 核心：首屏空载逻辑
+with st.container():
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        search_keyword = st.text_input("请输入化学式或元素进行检索 (例如: MoS2 或 MgO)", "").strip()
+    with c2:
+        energy_slider = st.slider("最高形成能:", -5.0, 0.5, 0.0)
 
-# --- 核心查询逻辑 ---
-base_query = "FROM Materials WHERE `形成能 (eV/atom)` <= ?"
-params = [energy_cutoff]
-if formula:
-    base_query += " AND `化学式` LIKE ?"
-    params.append(f"%{formula}%")
+# --- 💡 关键改动：只有输入了关键词才开始跑数据库 ---
+if not search_keyword:
+    st.info("💡 请在上方输入化学式，点击回车即可瞬间调取 13.5 万行数据。")
+    # 这里放一张你觉得好看的背景图，或者简单的系统介绍，避免空白
+    st.stop() # 停止运行后面的数据库查询代码
 
-# 计算总数
-total_rows = pd.read_sql_query(f"SELECT COUNT(*) {base_query}", conn, params=params).iloc[0,0]
+# --- 以下代码只有在输入 search_keyword 后才会执行 ---
 
-# 分页处理
+# 拼接查询条件
+base_where = "WHERE `化学式` LIKE ? AND `形成能 (eV/atom)` <= ?"
+params = [f"%{search_keyword}%", energy_cutoff]
+
+# 5. 秒级获取总数
+total_rows = fetch_data(f"SELECT COUNT(*) FROM Materials {base_where}", params).iloc[0, 0]
+
+# 6. 分页（每页30条）
 items_per_page = 30
-total_pages = (total_rows // items_per_page) + 1
 if 'page' not in st.session_state: st.session_state.page = 1
 
-# 查询当前页数据
 offset = (st.session_state.page - 1) * items_per_page
-final_query = f"SELECT * {base_query} LIMIT {items_per_page} OFFSET {offset}"
-df = pd.read_sql_query(final_query, conn, params=params)
+query_data = f"SELECT * FROM Materials {base_where} LIMIT {items_per_page} OFFSET {offset}"
+df = fetch_data(query_data, params)
 
-# --- 数据展示区 ---
 if not df.empty:
-    # 顶部数据概览
-    c1, c2, c3 = st.columns(3)
-    c1.metric("匹配材料总数", total_rows)
-    c2.metric("当前页平均带隙", f"{df['能带 (eV)'].mean():.2f} eV")
-    c3.metric("当前页平均形成能", f"{df['形成能 (eV/atom)'].mean():.2f}")
-
-    # 大表格展示 (use_container_width 让它变宽)
-    st.dataframe(df, use_container_width=True, height=550)
-
-    # 翻页控制栏
-    p1, p2, p3 = st.columns([1,2,1])
-    with p1:
-        if st.button("⬅️ 上一页") and st.session_state.page > 1:
+    st.success(f"✅ 找到 {total_rows} 个匹配材料")
+    st.dataframe(df, use_container_width=True, height=600)
+    
+    # 翻页按钮（简易版）
+    col1, col2 = st.columns([1, 1])
+    if st.session_state.page > 1:
+        if col1.button("⬅️ 上一页"):
             st.session_state.page -= 1
             st.rerun()
-    with p2:
-        st.write(f"第 **{st.session_state.page}** 页 / 共 {total_pages} 页")
-    with p3:
-        if st.button("下一页 ➡️") and st.session_state.page < total_pages:
+    if len(df) == items_per_page:
+        if col2.button("下一页 ➡️"):
             st.session_state.page += 1
             st.rerun()
-else:
-    st.error("❌ 未找到符合条件的材料，请调整筛选范围。")
