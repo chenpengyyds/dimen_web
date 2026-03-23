@@ -10,41 +10,41 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 
-# 1. 网页全局设置 (必须写在第一行)
-st.set_page_config(page_title="材料属性检索中心", page_icon="🏭", layout="wide")
+# --- 1. 极速缓存连接 ---
+@st.cache_resource
+def init_connection():
+    return sqlite3.connect("materials_web.db", check_same_thread=False)
 
-# 2. 网页大标题
-st.title("🏭 cp专属：一维/二维材料检索大本营")
-st.markdown("欢迎来到数字孪生材料工厂！在这里，您可以毫秒级查询 SQLite 数据库中的材料。")
+conn = init_connection()
 
-# 3. 左侧边栏：检索控制台
-st.sidebar.header("🔍 精准筛选引擎")
-search_formula = st.sidebar.text_input("🎯 搜索化学式 (如 MoS2，留空则看全部):", "")
-selected_dim = st.sidebar.selectbox("📐 选择晶体维度:", ["全部", "1D", "2D", "3D", "Molecular_or_Other"])
-max_energy = st.sidebar.slider("⚡ 允许的最高形成能 (eV/atom):", -5.0, 0.5, 0.1, step=0.05)
+# --- 2. 网页 UI 设置 ---
+st.title("🔬 极速版：高通量材料属性检索系统")
 
-# 4. 核心大脑：拼接 SQL 查询语句
-# 注意：因为表头带有空格和括号，SQL 里必须用反引号 ` 包起来
+# --- 3. 侧边栏筛选 ---
+with st.sidebar:
+    st.header("🔍 筛选条件")
+    formula = st.text_input("化学式:", "")
+    energy_cutoff = st.slider("最高形成能:", -5.0, 0.5, 0.0)
+    # 增加一个控制显示数量的滑块
+    row_limit = st.select_slider("显示条数:", options=[100, 500, 1000], value=500)
+
+# --- 4. 智能 SQL 查询 (核心：让数据库干活，不让浏览器干活) ---
 query = "SELECT * FROM Materials WHERE `形成能 (eV/atom)` <= ?"
-params = [max_energy]
+params = [energy_cutoff]
 
-# 如果厂长输入了化学式，就加上模糊匹配的条件
-if search_formula:
+if formula:
     query += " AND `化学式` LIKE ?"
-    params.append(f"%{search_formula}%")
+    params.append(f"%{formula}%")
 
-# 如果厂长指定了维度，就加上维度条件
-if selected_dim != "全部":
-    query += " AND `维度` = ?"
-    params.append(selected_dim)
+# 关键点：一定要加 LIMIT！
+query += f" LIMIT {row_limit}"
 
-# 5. 瞬间连接数据库并执行查询
-conn = sqlite3.connect("materials_web.db")
-df_results = pd.read_sql_query(query, conn, params=params)
-conn.close()
+# 执行查询
+df = pd.read_sql_query(query, conn, params=params)
 
-# 6. 将结果展示在网页中央
-st.success(f"✅ 检索完成！数据库引擎在 0.01 秒内为您锁定了 **{len(df_results)}** 个符合条件的王牌材料。")
-
-# 用极其美观的交互式表格展示出来
-st.dataframe(df_results, use_container_width=True, height=600)
+# --- 5. 结果展示 ---
+if not df.empty:
+    st.success(f"⚡ 检索完成！已展示最匹配的前 {len(df)} 条数据。")
+    st.dataframe(df, use_container_width=True)
+else:
+    st.warning("🏮 未找到符合条件的材料。")
